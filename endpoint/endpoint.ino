@@ -64,6 +64,8 @@ int pirPin = 4;    //the digital pin connected to the PIR sensor's output
 int ledPin = 13;
 
 uint8_t assocCmd[] = {'A','I'};
+uint8_t dHiCmd[] = {'D','H'};
+uint8_t dLoCmd[] = {'D','L'};
 
 AtCommandRequest atRequest = AtCommandRequest(assocCmd);
 
@@ -101,7 +103,21 @@ void setup(){
     delay(50);
     Serial.begin(9600);
     xbee.setSerial(Serial);
-    sendAtCommand();
+    nss.println("Waiting for sync");
+    int syncStat = sendAtCommand();
+    while (syncStat != 0){ 
+	syncStat = sendAtCommand();
+	nss.print("."); 
+	}
+    nss.printl();
+    atRequest = AtCommandRequest(dHiCmd);
+    uint64_t destHi = sendAtCommand();
+    atRequest = AtCommandRequest(dLoCmd);
+    uint64_t destLo = sendAtCommand();
+    nss.print("Connected to ");
+    nss.print(destHi);
+    nss.print(" ");
+    nss.print(destLo);
   }
 
 ////////////////////////////
@@ -144,7 +160,7 @@ void loop(){
   }
 
 
-void sendAtCommand() {
+uint64_t sendAtCommand() {
   nss.println("Sending command to the XBee");
 
   // send the command
@@ -169,31 +185,37 @@ void sendAtCommand() {
           nss.println(atResponse.getValueLength(), DEC);
 
           nss.print("Command value: ");
-          
+          int ret;
           for (int i = 0; i < atResponse.getValueLength(); i++) {
+	    ret = (ret *16) + atResponse.getValue()[i];
             nss.print(atResponse.getValue()[i], HEX);
             nss.print(" ");
           }
 
           nss.println("");
+	  return ret;
         }
       } 
       else {
         nss.print("Command return error code: ");
         nss.println(atResponse.getStatus(), HEX);
+	return atResponse.getStatus();
       }
     } else {
       nss.print("Expected AT response but got ");
       nss.println(xbee.getResponse().getApiId(), HEX);
+      return -2;
     }   
   } else {
     // at command failed
     if (xbee.getResponse().isError()) {
       nss.print("Error reading packet.  Error code: ");  
       nss.println(xbee.getResponse().getErrorCode());
+      return xbee.getResponse().getErrorCode();
     } 
     else {
       nss.println("No response from radio");  
+      return -1;
     }
   }
 }

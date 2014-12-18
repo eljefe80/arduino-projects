@@ -27,7 +27,10 @@
 
 #include <XBee.h>
 #include <SoftwareSerial.h>
+#include <SimpleTimer.h>
 
+// the timer object
+SimpleTimer timer;
 
 typedef struct zdo_device_annce_t {
 uint8_t	transaction;
@@ -63,7 +66,7 @@ SoftwareSerial nss(ssRX, ssTX);
 /////////////////////////////
 //VARS
 //the time we give the sensor to calibrate (10-60 secs according to the datasheet)
-int calibrationTime = 5; //30;        
+int calibrationTime = 30;        
 
 //the time when the sensor outputs a low impulse
 long unsigned int lowIn;         
@@ -80,14 +83,11 @@ int ledPin = 13;
 
 uint8_t assocCmd[] = {'A','I'};
 uint8_t rstCmd[] = {'F','R'};
-uint8_t dHiCmd[] = {'D','H'};
-uint8_t dLoCmd[] = {'D','L'};
 
 uint8_t sHiCmd[] = {'S','H'};
 uint8_t sLoCmd[] = {'S','L'};
 uint8_t ndCmd[] = {'N','D'};
 uint8_t myCmd[] = {'M','Y'};
-uint8_t mpCmd[] = {'M','P'};
 
 AtCommandRequest atRequest;
 
@@ -103,6 +103,7 @@ ZBTxRequest tx;
 XBeeAddress64 Broadcast = XBeeAddress64(0x00000000, 0x0000ffff);
 XBeeAddress64 Coordinator = Broadcast;
 uint16_t CoordinatorShortAddress = 0xfffe;
+bool XBeeConnected = false;
 // Create a TX Request
 //ZBTxRequest zbTx = ZBTxRequest(addr64, payload, sizeof(payload));
 
@@ -122,6 +123,8 @@ void setup(){
   //pinMode(ledPin, OUTPUT);
   digitalWrite(pirPin, LOW);
   //give the sensor some time to calibrate
+  timer.setInterval(60000, instantaneous);
+  timer.setInterval(300000, cumulative);
   nss.print("calibrating sensor ");
     for(int i = 0; i < calibrationTime; i++){
       nss.print(".");
@@ -132,7 +135,6 @@ void setup(){
     //delay(50);
 
     atRequest = AtCommandRequest(rstCmd);
-    nss.println("resetting firmware");
     uint32_t syncStat = sendAtCommand(rstCmd,true);
     while (syncStat != -2){
         delay(1000);
@@ -149,7 +151,6 @@ void setup(){
 	//nss.print(syncStat); 
 	}
         atRequest = AtCommandRequest(ndCmd);
-    nss.println("Parent Network Address");
     syncStat = sendAtCommand(ndCmd,true);
     while (syncStat != 1){
         delay(1000);
@@ -184,7 +185,6 @@ void setup(){
     nss.print(":");
     nss.println(my,HEX);
     nss.println();
-    nss.println(F("Sending Device Announce to Coordinator"));
     // {0x22,mySrc, mySrcLong};
 /*typedef PACKED_STRUCT zdo_device_annce_t {
 uint8_t	transaction;
@@ -256,10 +256,10 @@ addr64 ieee_address_le;
 ////////////////////////////
 //LOOP
 void loop(){
-         AtCommandResponse myResponse;
+    AtCommandResponse myResponse;
     ModemStatusResponse modemStatus;
     ZBTxStatusResponse zbTxStatus;
-    bool XBeeConnected = false;
+    timer.run();
     xbee.readPacket();
      if (xbee.getResponse().isAvailable()) {
       // got something
@@ -290,38 +290,21 @@ void loop(){
          nss.println(myResponse.getCommand()[1],HEX);
          break;
         case ZB_EXPLICIT_RX_RESPONSE:
-         if (ZBRx16.getOption() == ZB_PACKET_ACKNOWLEDGED) {
-          // the sender got an ACK
-          nss.println("packet acknowledged");
-         } 
-         else {
-          nss.println("packet not acknowledged");
-         }
-         
-         nss.print("checksum is ");
-         nss.println(ZBRx16.getChecksum(), HEX);
 
-         nss.print("packet length is ");
-         nss.println(ZBRx16.getPacketLength(), DEC);
-
-         nss.print("Lsb length is ");
-         nss.println(ZBRx16.getLsbLength(), DEC);
-         nss.print("Msb length is ");
-         nss.println(ZBRx16.getLsbLength(), DEC);
          switch (ZBRx16.getClusterId()){
            case 0x0005:
-             nss.println("\tReceived Active Endpoint message");
+//             nss.println("\tReceived Active Endpoint message");
              break;
            case 0x8006:
-             nss.println("\Received Match Descriptor message");
+//             nss.println("\Received Match Descriptor message");
              break;
            case 0x00f6:
-             nss.println("\tReceived hardware join message 1");
+//             nss.println("\tReceived hardware join message 1");
              break;
            case 0x00f0:
            {
-             nss.println("\tReceived hardware join message 1");
-             uint8_t rrrPayload[] = {0,0};
+//             nss.println("\tReceived hardware join message 2");
+/*             uint8_t rrrPayload[] = {0,0};
              txCmd = ZBExpCommand(Coordinator, //This will be broadcast to all devices
               CoordinatorShortAddress, // addr16
               0, //srcEndpoint
@@ -335,34 +318,35 @@ void loop(){
               0x00
              );   // frame ID
              xbee.send(txCmd);  
-             XBeeConnected = true;
+*/             XBeeConnected = true;
              break;
            }
          }
          break;
         default: {
-         nss.print("Source address: ");
+         nss.print(F("Source address: "));
          nss.print(ZBRx16.getRemoteAddress64().getMsb(),HEX); 
          nss.print(ZBRx16.getRemoteAddress64().getLsb(),HEX);
-         nss.print(" ApiID: ");
+         nss.print(F(" ApiID: "));
          nss.println(ZBRx16.getApiId());
          break;
         }
        } 
      } else if (xbee.getResponse().isError()) {
-      nss.print("oh no!!! error code:");
+      nss.print(F("oh no!!! error code:"));
       nss.println(xbee.getResponse().getErrorCode());
     }
-    if (XBeeConnected) {
+  if (XBeeConnected) {
      if(digitalRead(pirPin) == HIGH){
-       digitalWrite(ledPin, HIGH);   //the led visualizes the sensors output pin state
+       //digitalWrite(ledPin, HIGH);   //the led visualizes the sensors output pin state
        if(lockLow){  
+       nss.println("pirPin High");
          //makes sure we wait for a transition to LOW before any further output is made:
          lockLow = false;            
-         nss.println("---");
+         /*nss.println("---");
          nss.print("motion detected at ");
          nss.print(millis()/1000);
-         nss.println(" sec"); 
+         nss.println(" sec"); */
          delay(50);
          }         
          uint8_t rrrPayload[] = {0xfd,0};
@@ -382,7 +366,8 @@ void loop(){
          takeLowTime = true;
        }
 
-     if(digitalRead(pirPin) == LOW){       
+
+     if(digitalRead(pirPin) == LOW){  
 //       digitalWrite(ledPin, LOW);  //the led visualizes the sensors output pin state
 
        if(takeLowTime){
@@ -392,12 +377,13 @@ void loop(){
        //if the sensor is low for more than the given pause, 
        //we assume that no more motion is going to happen
        if(!lockLow && millis() - lowIn > pause){  
+       nss.println("pirPin Low");     
            //makes sure this block of code is only executed again after 
            //a new motion sequence has been detected
            lockLow = true;                        
-           nss.print("motion ended at ");      //output
+           /*nss.print("motion ended at ");      //output
            nss.print((millis() - pause)/1000);
-           nss.println(" sec");
+           nss.println(" sec");*/
            uint8_t rrrPayload[] = {0xfe,0};
            txCmd = ZBExpCommand(Coordinator, //This will be broadcast to all devices
               CoordinatorShortAddress, // addr16
@@ -419,7 +405,7 @@ void loop(){
   }
 
 
-void match_descriptor_request() {
+/*void match_descriptor_request() {
       uint8_t rrrPayload[] = {0x12,0x01};
     tx = ZBTxRequest(Coordinator, //This will be broadcast to all devices
       0xfffe,
@@ -429,15 +415,15 @@ void match_descriptor_request() {
       sizeof(rrrPayload),    //payload length
       0x00);   // frame ID
     xbee.send(tx);	
-}
+}*/
 
 uint32_t sendAtCommand(uint8_t* command, bool SendCommand) {
   AtCommandResponse myResponse;
   ModemStatusResponse modemStatus;
   if (SendCommand) {
-    nss.print("Sending command to the XBee:");
-    nss.print(command[0]);
-    nss.println(command[1]);
+    //nss.print("Sending command to the XBee:");
+    //nss.print(command[0]);
+    //nss.println(command[1]);
     // send the command
     xbee.send(atRequest);
   }
@@ -454,29 +440,29 @@ while (1) {
               (myResponse.getCommand()[1] != command[1]))
               continue;
       if (myResponse.isOk()) {
-        nss.print("Command [");
+        /*nss.print("Command [");
         nss.print(myResponse.getCommand()[0]);
         nss.print(myResponse.getCommand()[1]);
-        nss.println("] was successful!");
+        nss.println("] was successful!");*/
 
         if (myResponse.getValueLength() > 0) {
-          nss.print("Command value length is ");
+          /*nss.print("Command value length is ");
           nss.println(myResponse.getValueLength(), DEC);
 
-          nss.print("Command value: ");
+          nss.print("Command value: ");*/
           uint32_t ret = 0;
           for (int i = 0; i < myResponse.getValueLength(); i++) {
 	    ret = (ret *256) + myResponse.getValue()[i];
-            nss.print(myResponse.getValue()[i], HEX);
-            nss.print(" ");
+            /*nss.print(myResponse.getValue()[i], HEX);
+            nss.print(" ");*/
           }
-          nss.println("");
+/*          nss.println("");
           nss.print("Command: ");
           nss.print(myResponse.getCommand()[0],HEX);
           nss.print(myResponse.getCommand()[1],HEX);
           nss.print(" command: ");
           nss.print(command[0],HEX);
-          nss.println(command[1],HEX);
+          nss.println(command[1],HEX);*/
           if ((command[0] == 'N') && (command[1] == 'D')) {
             uint32_t source_addr = myResponse.getValue()[0]*256 + myResponse.getValue()[1];
             uint32_t source_addr_long_hi = myResponse.getValue()[2];
@@ -500,8 +486,8 @@ while (1) {
         }
       } 
       else {
-        nss.print("Command return error code: ");
-        nss.println(myResponse.getStatus(), HEX);
+        /*nss.print("Command return error code: ");
+        nss.println(myResponse.getStatus(), HEX);*/
 	return myResponse.getStatus();
       }
     } else {
@@ -528,3 +514,54 @@ while (1) {
   }
 }
 }
+
+void instantaneous(){
+    if (XBeeConnected) {
+      nss.println("Instantaneous");
+       uint8_t rrrPayload[] = {0x0,0x81,0x0};
+         txCmd = ZBExpCommand(Coordinator, //This will be broadcast to all devices
+              CoordinatorShortAddress, // addr16
+              0x2, //srcEndpoint
+              0x2, //dstEndpoint
+              0x00ef, //clusterId
+              0xc216, //profileId
+              0,    //broadcast radius
+              0x01,    //option
+              (uint8_t*)&rrrPayload, //payload
+              sizeof(rrrPayload),    //payload length
+              0x00
+             );   // frame ID
+         xbee.send(txCmd); 
+    }
+}
+void cumulative(){
+ if (XBeeConnected) {
+    nss.println("Cumulative");
+         uint32_t time2,time = (millis()/1000);
+         uint8_t rrrPayload[] = {0x91,0x82,0x0,0x0,0x0,0x0,0xd8,0xd8,0x03,0x00,0x00};
+         rrrPayload[3] = 0;
+         rrrPayload[4] = 0;
+         rrrPayload[5] = 0;
+         rrrPayload[6] = 0;
+         time2 = time % 256;
+         rrrPayload[7] = time2;
+         time2 = (time - time2) % (256*256);
+         rrrPayload[8] = time2;
+         time2 = (time - time2) % (256*256*256);
+         rrrPayload[9] = time2;
+         rrrPayload[10] = time - time2;
+         txCmd = ZBExpCommand(Coordinator, //This will be broadcast to all devices
+              CoordinatorShortAddress, // addr16
+              0x2, //srcEndpoint
+              0x2, //dstEndpoint
+              0x00ef, //clusterId
+              0xc216, //profileId
+              0,    //broadcast radius
+              0x01,    //option
+              (uint8_t*)&rrrPayload, //payload
+              sizeof(rrrPayload),    //payload length
+              0x00
+             );   // frame ID
+         xbee.send(txCmd); 
+     }
+    }
